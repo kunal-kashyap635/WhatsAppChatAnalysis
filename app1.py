@@ -31,55 +31,68 @@ st.sidebar.title("📊 WhatsApp Chat Analyzer")
 uploaded_file = st.sidebar.file_uploader("Upload WhatsApp ZIP", type=["zip"])
 
 
-# ---------------- SORT MEDIA ----------------
-def sort_media_files(base_folder="chats"):
+def process_zip(uploaded_file):
 
-    media_root = os.path.join(base_folder, "media")
+    base_path = "chats"
+    os.makedirs(base_path, exist_ok=True)
 
+    # 👉 unique folder per upload
+    chat_name = uploaded_file.name.split(".")[0].replace(" ", "_")
+    chat_path = os.path.join(base_path, chat_name)
+
+    if os.path.exists(chat_path):
+        shutil.rmtree(chat_path)
+
+    os.makedirs(chat_path)
+
+    temp_path = os.path.join(chat_path, "temp")
+    os.makedirs(temp_path)
+
+    # extract
+    with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
+        zip_ref.extractall(temp_path)
+
+    # media folders
+    media_path = os.path.join(chat_path, "media")
     folders = {
-        "IMG": os.path.join(media_root, "images"),
-        "VID": os.path.join(media_root, "videos"),
-        "AUD": os.path.join(media_root, "audio"),
-        "PTT": os.path.join(media_root, "voice"),
+        "images": os.path.join(media_path, "images"),
+        "videos": os.path.join(media_path, "videos"),
+        "audio": os.path.join(media_path, "audio"),
+        "voice": os.path.join(media_path, "voice"),
     }
 
-    for folder in folders.values():
-        os.makedirs(folder, exist_ok=True)
+    for f in folders.values():
+        os.makedirs(f, exist_ok=True)
 
-    for file in os.listdir(base_folder):
+    chat_txt_path = None
 
-        src_path = os.path.join(base_folder, file)
+    # process files
+    for file in os.listdir(temp_path):
 
-        if not os.path.isfile(src_path):
-            continue
+        src = os.path.join(temp_path, file)
 
-        if file.startswith("IMG"):
-            shutil.move(src_path, os.path.join(folders["IMG"], file))
+        if file.endswith(".txt"):
+            chat_txt_path = os.path.join(chat_path, "chat.txt")
+            shutil.move(src, chat_txt_path)
+
+        elif file.startswith("IMG"):
+            shutil.move(src, os.path.join(folders["images"], file))
 
         elif file.startswith("VID"):
-            shutil.move(src_path, os.path.join(folders["VID"], file))
+            shutil.move(src, os.path.join(folders["videos"], file))
 
         elif file.startswith("AUD"):
-            shutil.move(src_path, os.path.join(folders["AUD"], file))
+            shutil.move(src, os.path.join(folders["audio"], file))
 
         elif file.startswith("PTT"):
-            shutil.move(src_path, os.path.join(folders["PTT"], file))
+            shutil.move(src, os.path.join(folders["voice"], file))
 
+        else:
+            pass  # ignore pdf, vcf, stk etc
 
-# ---------------- EXTRACT ZIP ----------------
-def extract_zip(uploaded_file):
+    shutil.rmtree(temp_path)
 
-    extract_path = "chats"
-
-    os.makedirs(extract_path, exist_ok=True)
-
-    with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
-        zip_ref.extractall(extract_path)
-
-    # 🔥 auto sort media
-    sort_media_files(extract_path)
-
-    return extract_path
+    return chat_txt_path, chat_path
 
 
 # model 1 time load hoga
@@ -87,20 +100,17 @@ def extract_zip(uploaded_file):
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
+
 model = load_model()
+
 
 # Load Data
 @st.cache_data
 def load_data(uploaded_file):
 
     if uploaded_file.name.endswith(".zip"):
-        folder_path = extract_zip(uploaded_file)
 
-        # find txt
-        chat_path = None
-        for file in os.listdir(folder_path):
-            if file.endswith(".txt"):
-                chat_path = os.path.join(folder_path, file)
+        chat_path, folder_path = process_zip(uploaded_file)
 
         with open(chat_path, "r", encoding="utf-8") as f:
             data = f.read()
@@ -110,13 +120,13 @@ def load_data(uploaded_file):
 
     df = preprocessor.preprocess(data)
 
-    return df
+    return df, folder_path
 
 
 # ---------------- MAIN ----------------
 if uploaded_file is not None:
 
-    df = load_data(uploaded_file)
+    df, folder_path = load_data(uploaded_file)
 
     # users
     user_list = df["user"].unique().tolist()
@@ -304,7 +314,9 @@ if uploaded_file is not None:
         # ---------------- IMAGES ----------------
         st.title("📸 Image Gallery")
 
-        image_paths = helper.get_images(selected_user, df, "chats/media/images")
+        image_paths = helper.get_images(
+            selected_user, df, f"{folder_path}/media/images"
+        )
 
         if len(image_paths) == 0:
             st.info("📭 No images found in this chat.")
@@ -319,7 +331,9 @@ if uploaded_file is not None:
         # ---------------- VIDEOS ----------------
         st.title("🎥 Video Preview")
 
-        video_paths = helper.get_videos(selected_user, df, "chats/media/videos")
+        video_paths = helper.get_videos(
+            selected_user, df, f"{folder_path}/media/videos"
+        )
 
         if len(video_paths) == 0:
             st.info("📭 No videos found.")
@@ -334,7 +348,9 @@ if uploaded_file is not None:
         # ---------------- VOICE ----------------
         st.title("🎙 Voice Notes")
 
-        voice_paths = helper.get_voice_files(selected_user, df, "chats/media/voice")
+        voice_paths = helper.get_voice_files(
+            selected_user, df, f"{folder_path}/media/voice"
+        )
 
         if len(voice_paths) == 0:
             st.info("📭 No voice notes available.")
@@ -384,7 +400,7 @@ if uploaded_file is not None:
             return helper.get_embeddings(model, df)
 
         embeddings = get_embeddings_cached(df)
-        
+
         if "results" not in st.session_state:
             st.session_state.results = None
 
@@ -410,6 +426,6 @@ if uploaded_file is not None:
 
         st.write(f"Total Toxic Messages: {toxic_df.shape[0]}")
 
-        st.dataframe(toxic_df[["user", "message"]].sample(50))
+        st.dataframe(toxic_df[["user", "message"]].sample(10))
 
         st.divider()
