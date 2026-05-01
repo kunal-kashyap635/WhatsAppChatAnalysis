@@ -30,7 +30,6 @@ st.sidebar.title("📊 WhatsApp Chat Analyzer")
 # File upload in Zip format
 uploaded_file = st.sidebar.file_uploader("Upload WhatsApp ZIP", type=["zip"])
 
-
 def process_zip(uploaded_file):
 
     base_path = "chats"
@@ -99,7 +98,6 @@ def process_zip(uploaded_file):
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
-
 
 model = load_model()
 
